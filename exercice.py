@@ -25,26 +25,43 @@ from utils.fft import *
 SAMPLING_FREQ = 44100
 
 
-def build_spectrogram_animation(filename, fft_size, x_range=None, y_range=None):
-	# Fonction qui se fait appelée périodiquement pour redissiner le graphique
+def build_draw_frame_fn(refresh_period_ms):
+	last_t = 0
+	# Fonction qui se fait appelée périodiquement pour redessiner le graphique
 	def draw_frame(frame, fig, graph, line, spec):
 		global playing
+		nonlocal last_t
 		if not playing:
 			fig.canvas.draw()
 			fig.canvas.flush_events()
 			return
 
-		# TODO: Mettre dans la variable x l'axe fréquentiel et dans y l'axe de valeurs de la prochaine itération du spectrogramme.
+		# On met dans la variable x l'axe fréquentiel et dans y l'axe de valeurs de la prochaine itération du spectrogramme.
+		try:
+			y, x = next(spec)
+		# S'il ne reste rien à traiter, on met des listes vides dans x et y (ça va juste rien faire).
+		except StopIteration:
+			x, y = [], []
 
-		# TODO: S'il ne reste rien à traiter, on ferme le graphique avec plt.close(fig) et on met des listes vides dans x et y
-
-		# On met à jour seulement les données des lignes (avec nos deux axes) et on redesinne le graphique.
+		# On met à jour seulement les données des lignes (avec nos deux axes) et on redessine le graphique.
 		line.set_xdata(x)
 		line.set_ydata(y)
 		fig.canvas.draw()
 		fig.canvas.flush_events()
 
-	# TODO: Charger le fichier, le mixer (en normalisant) et créer son spectrogramme. On utilse une fenêtre de Hanning (on passe "hann")
+		# On attend jusqu'au prochain rafraichissement déterminé par refresh_period_ms
+		while (time.time_ns() - last_t)/1_000_000 < refresh_period_ms:
+			pass
+		print(frame, (time.time_ns()-last_t)/1_000_000)
+		last_t = time.time_ns()
+	return draw_frame
+
+def build_spectrogram_animation(filename, fft_size, x_range=None, y_range=None):
+	# On charge le fichier, le mixer (en normalisant) et créer son spectrogramme.
+	channels, fps = load_wav(filename)
+	sig = mix_signals(channels, 0.89)
+	# On crée le spectrogramme. On utilse une fenêtre de Hanning (on passe "hann")
+	spec = spectrogram(sig, fft_size, fps, "hann")
 
 	# Création de la figure en laissant de l'espace en bas pour des boutons (ou autres)
 	fig = plt.figure("Spectrogram")
@@ -52,19 +69,25 @@ def build_spectrogram_animation(filename, fft_size, x_range=None, y_range=None):
 
 	# Création du graphe dans l'espace du haut.
 	graph = fig.add_subplot(gs[0, 0])
-	# TODO : Appliquer une échelle logarithmique à l'axe des X.
-
-	# TODO : Contraindre les valeurs des axes si `x_range` ou `y_range` ne sont pas vides.
+	# On applique une échelle logarithmique à l'axe des X.
+	graph.set_xscale("log")
+	# On contraint les valeurs des axes si `x_range` ou `y_range` ne sont pas None.
 	if x_range is not None:
-		pass #TODO
+		graph.set_xlim(*x_range)
 	if y_range is not None:
-		pass #TODO
+		graph.set_ylim(*y_range)
 
 	# Création de la courbe qui va dessiner la FFT.
 	line = graph.plot([], [])[0]
 
 	refresh_period_ms = 1000 / (fps / fft_size)
-	return fig, anim.FuncAnimation(fig, draw_frame, fargs=(fig, graph, line, spec), interval=refresh_period_ms)
+	print(f"expected: {refresh_period_ms} ms")
+
+	last_t = 0
+	# Fonction qui se fait appelée périodiquement pour redessiner le graphique
+	draw_frame = build_draw_frame_fn(refresh_period_ms)
+
+	return fig, anim.FuncAnimation(fig, draw_frame, fargs=(fig, graph, line, spec), interval=1)
 
 def wait_and_play(filename):
 	global playing
@@ -102,14 +125,13 @@ def main():
 	# TODO: Afficher la FFT de `block_chord` dans une fenêtre.
 	
 	# TODO: Pour chaque note générée précédemment (dans `notes`), afficher sa FFT. On veut ici les afficher indépendamment, mais sur le même graphique.
-	
 
 	wav_filename = "data/stravinsky.wav"
 
 	# Création de l'animation. On contraint ici nos axes pour visionner le domaine intéressant des données.
 	fig, ani = build_spectrogram_animation(wav_filename, 4096, (20, 10_000), (0, 0.2))
 	
-	# Création bouton qui part le dessin et la musique.
+	# Création du bouton qui part le dessin et la musique.
 	btn_pos = fig.add_axes([0.8, 0.05, 0.15, 0.10])
 	def start_play(event):
 		global playing
